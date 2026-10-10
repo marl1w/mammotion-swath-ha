@@ -1,0 +1,13 @@
+# Actions only. The test dependencies are unpinned, so a pip block would have nothing to raise.
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"

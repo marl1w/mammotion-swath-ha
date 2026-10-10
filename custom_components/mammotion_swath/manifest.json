@@ -1,0 +1,24 @@
+{
+  "domain": "mammotion_swath",
+  "name": "Mammotion Swath",
+  "after_dependencies": [
+    "mammotion"
+  ],
+  "codeowners": [
+    "@marl1w"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/marl1w/mammotion-swath-ha",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/marl1w/mammotion-swath-ha/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

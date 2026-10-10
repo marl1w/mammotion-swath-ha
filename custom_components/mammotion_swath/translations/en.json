@@ -1,0 +1,14 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mammotion Swath",
+        "description": "Adds a Mower panel to the sidebar with the live lawn map, the planned route and what it leaves out, saved jobs and the mower's camera. It works on top of the Mammotion integration."
+      }
+    },
+    "abort": {
+      "no_mowers": "No Mammotion mower found. Set up the Mammotion integration first.",
+      "single_instance_allowed": "Mammotion Swath is already set up."
+    }
+  }
+}

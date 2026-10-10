@@ -1,0 +1,6 @@
+# Test dependencies. The Mammotion integration itself is not needed: the tests stand up
+# its registry entries, runtime record and services in the shape Swath reads.
+pytest-homeassistant-custom-component
+home-assistant-frontend
+shapely
+ruff

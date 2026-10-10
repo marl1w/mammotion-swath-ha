@@ -91,24 +91,11 @@ def route_geojson(lines: list[list[list[float]]]) -> dict[str, Any]:
     }
 
 
-def upstream_record(
-    *, bp_info: int = 0, area: int = 98, path_hash: int = 7, real_toward: int = 25219
-) -> SimpleNamespace:
-    """The upstream per-mower runtime record, as far as Swath reads it.
-
-    The pose defaults are the real Yuka's, read while docked facing its lawn.
-    """
+def upstream_record(*, bp_info: int = 0, area: int = 98, path_hash: int = 7) -> SimpleNamespace:
+    """The upstream per-mower runtime record, as far as Swath reads it."""
     work = SimpleNamespace(bp_info=bp_info, area=area, path_hash=path_hash)
-    report = SimpleNamespace(
-        work=work,
-        dev=SimpleNamespace(sys_status=11),
-        locations=[SimpleNamespace(real_toward=real_toward)],
-    )
-    location = SimpleNamespace(
-        device=SimpleNamespace(latitude=48.0000890, longitude=11.0000310),
-        RTK=SimpleNamespace(yaw=-3.04028986),
-    )
-    coordinator = SimpleNamespace(data=SimpleNamespace(report_data=report, location=location))
+    report = SimpleNamespace(work=work, dev=SimpleNamespace(sys_status=11))
+    coordinator = SimpleNamespace(data=SimpleNamespace(report_data=report))
     return SimpleNamespace(unique_name=UNIQUE_NAME, reporting_coordinator=coordinator)
 
 

@@ -12,15 +12,14 @@ import logging
 from typing import Any
 
 from homeassistant.components import websocket_api
-from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
-from homeassistant.helpers.event import async_track_state_change_event
 import voluptuous as vol
 
 from .const import DOMAIN, UPSTREAM_DOMAIN
 from .coverage import compute_coverage
 from .discovery import async_discover_mowers, async_find_mower
-from .upstream import async_job_facts, async_pose
+from .upstream import async_job_facts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,46 +34,6 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_snapshot)
     websocket_api.async_register_command(hass, ws_plan_fresh)
     websocket_api.async_register_command(hass, ws_start_task)
-    websocket_api.async_register_command(hass, ws_subscribe_pose)
-
-
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/subscribe_pose", vol.Required("lawn_mower"): str}
-)
-@callback
-def ws_subscribe_pose(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
-) -> None:
-    """Push the mower's position and true heading whenever its tracker reports.
-
-    The tracker entity's `direction` attribute cannot be used for the heading (see
-    `heading_from_toward`), so the pose is read from upstream on every tracker update.
-    Without that read, the tracker's position is sent with no heading.
-    """
-    mower = async_find_mower(hass, msg["lawn_mower"])
-    tracker = mower.roles.get("tracker") if mower else None
-    if mower is None or tracker is None:
-        connection.send_error(msg["id"], "not_found", "No tracked Mammotion mower")
-        return
-
-    @callback
-    def send(_event: Event[EventStateChangedData] | None = None) -> None:
-        pose = async_pose(hass, mower.unique_name)
-        if pose is not None:
-            payload = pose.as_dict()
-        else:
-            state = hass.states.get(tracker)
-            attrs = state.attributes if state else {}
-            payload = {
-                "latitude": attrs.get("latitude"),
-                "longitude": attrs.get("longitude"),
-                "heading": None,
-            }
-        connection.send_message(websocket_api.event_message(msg["id"], payload))
-
-    connection.subscriptions[msg["id"]] = async_track_state_change_event(hass, [tracker], send)
-    connection.send_result(msg["id"])
-    send()
 
 
 async def _upstream_response(hass: HomeAssistant, service: str, entity_id: str) -> Any:

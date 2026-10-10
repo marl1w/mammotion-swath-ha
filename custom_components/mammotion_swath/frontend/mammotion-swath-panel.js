@@ -297,7 +297,7 @@ class MammotionSwathPanel extends HTMLElement {
     this._pose = null;
     this._travelFrom = null;
     this._travelHeading = null;
-    this._unsubPose = null;
+    this._lastFix = null;
     this._panzoom = null;
     this._view = null;
     this._cameraWatch = null;
@@ -325,66 +325,59 @@ class MammotionSwathPanel extends HTMLElement {
   set route(_value) {}
 
   connectedCallback() {
-    if (this._hass && !this._timers.length) {
-      this._startTimers();
-      this._subscribePose();
-    }
+    if (this._hass && !this._timers.length) this._startTimers();
   }
 
   disconnectedCallback() {
     for (const t of this._timers) clearInterval(t);
     this._timers = [];
-    this._unsubscribePose();
     clearInterval(this._cameraWatch);
     this._resizeObserver?.disconnect();
   }
 
-  async _subscribePose() {
-    this._unsubscribePose();
-    const mowerId = this._mowerId;
-    if (!mowerId || !this._hass?.connection) return;
-    try {
-      const unsub = await this._hass.connection.subscribeMessage((pose) => this._onPose(pose), {
-        type: `${DOMAIN}/subscribe_pose`,
-        lawn_mower: mowerId,
-      });
-      if (mowerId === this._mowerId) this._unsubPose = unsub;
-      else unsub();
-    } catch {
-      this._unsubPose = null;
-    }
-  }
-
-  _unsubscribePose() {
-    if (this._unsubPose) {
-      this._unsubPose();
-      this._unsubPose = null;
-    }
+  /** Forget the mower's movement, as when switching to another mower. */
+  _resetPose() {
     this._pose = null;
     this._travelFrom = null;
     this._travelHeading = null;
+    this._lastFix = null;
+  }
+
+  /** Feed the tracker's position to the pose logic when it changes (about once a second). */
+  _trackPosition() {
+    const tracker = this._mower?.roles.tracker;
+    const lat = this._attr(tracker, "latitude");
+    const lon = this._attr(tracker, "longitude");
+    const fix = `${lat},${lon},${this._state(this._mower?.lawn_mower)}`;
+    if (fix === this._lastFix) return;
+    this._lastFix = fix;
+    this._onPose({ latitude: lat, longitude: lon });
   }
 
   /**
-   * A new position. While the mower is moving, the arrow follows its direction of travel,
-   * which is right by construction; the reported heading is used when it stands still.
+   * A new position. The mower's own reported heading is not used: while docked it was
+   * seen to swing by 90° with the mower not moving. Instead, a docked mower faces out of
+   * its dock along the map's channel path; a moving one faces where it is going; a
+   * stopped one keeps the direction it last travelled in.
    */
-  _onPose({ latitude, longitude, heading }) {
+  _onPose({ latitude, longitude }) {
     const lat = Number(latitude);
     const lon = Number(longitude);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
     const here = { lat, lon };
-    const moving = this._state(this._mower?.lawn_mower) === "mowing" || this._state(this._mower?.lawn_mower) === "returning";
-    if (!moving) {
+    const state = this._state(this._mower?.lawn_mower);
+    if (state === "mowing" || state === "returning") {
+      if (!this._travelFrom) {
+        this._travelFrom = here;
+      } else if (distance(this._travelFrom, here) >= MIN_TRAVEL_M) {
+        this._travelHeading = bearing(this._travelFrom, here);
+        this._travelFrom = here;
+      }
+    } else {
       this._travelFrom = here;
-      this._travelHeading = null;
-    } else if (!this._travelFrom) {
-      this._travelFrom = here;
-    } else if (distance(this._travelFrom, here) >= MIN_TRAVEL_M) {
-      this._travelHeading = bearing(this._travelFrom, here);
-      this._travelFrom = here;
+      if (state === "docked") this._travelHeading = null;
     }
-    this._pose = { lat, lon, heading: this._travelHeading ?? (Number.isFinite(heading) ? heading : null) };
+    this._pose = { lat, lon, heading: this._travelHeading, docked: state === "docked" };
     placeRobot(this._rendered, this._pose);
   }
 
@@ -403,7 +396,7 @@ class MammotionSwathPanel extends HTMLElement {
     await Promise.race([customElements.whenDefined("ha-button"), new Promise((r) => setTimeout(r, 1500))]);
     await this._loadMowers();
     this._startTimers();
-    this._subscribePose();
+    this._trackPosition();
   }
 
   _startTimers() {
@@ -482,7 +475,7 @@ class MammotionSwathPanel extends HTMLElement {
       }
     }
     this._renderStatus();
-    if (!this._pose) placeRobot(this._rendered, this._robot());
+    this._trackPosition();
     if (this._cameraCard) this._cameraCard.hass = this._hass;
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) menu.hass = this._hass;
@@ -497,11 +490,12 @@ class MammotionSwathPanel extends HTMLElement {
   }
 
   _robot() {
-    if (this._pose) return this._pose;
-    // Until the pose subscription answers, show the tracker's position with no arrow: its
-    // `direction` attribute is truncated radians, not a compass bearing.
+    const docked = this._state(this._mower?.lawn_mower) === "docked";
+    if (this._pose) return { ...this._pose, docked };
+    // Until the pose subscription answers, the tracker's position; its `direction`
+    // attribute is truncated radians, not a compass bearing, so it is not used.
     const tracker = this._mower?.roles.tracker;
-    return { lat: Number(this._attr(tracker, "latitude")), lon: Number(this._attr(tracker, "longitude")), heading: null };
+    return { lat: Number(this._attr(tracker, "latitude")), lon: Number(this._attr(tracker, "longitude")), heading: null, docked };
   }
 
   // ----------------------------------------------------------------- rendering
@@ -526,11 +520,12 @@ class MammotionSwathPanel extends HTMLElement {
           writePrefs({ mower: this._mowerId });
           this._snapshot = null;
           this._view = null;
+          this._resetPose();
           this._camera = this._mower?.cameras[0] || null;
           this._render();
           this._loadSnapshot();
           this._loadActivity();
-          this._subscribePose();
+          this._trackPosition();
         },
       });
       for (const m of this._mowers) select.append(el("option", { value: m.lawn_mower, text: m.name, selected: m.lawn_mower === this._mowerId }));

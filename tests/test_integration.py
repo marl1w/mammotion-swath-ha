@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
-import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.mammotion_swath.const import DOMAIN, PANEL_TITLE, PANEL_URL_PATH
@@ -188,39 +187,6 @@ async def test_start_task_without_breakpoint_just_starts(hass, hass_ws_client) -
     assert [(c.service, c.data["entity_id"]) for c in calls] == [
         ("start_task", "button.yuka_task_1")
     ]
-
-
-async def test_pose_subscription_sends_true_heading(hass, hass_ws_client) -> None:
-    add_upstream_mower(hass)
-    await _setup(hass)
-    client = await hass_ws_client(hass)
-
-    await client.send_json_auto_id({"type": f"{DOMAIN}/subscribe_pose", "lawn_mower": LAWN_MOWER})
-    assert (await client.receive_json())["success"]
-    first = (await client.receive_json())["event"]
-    assert first["heading"] == pytest.approx(119.7, abs=0.5)
-    assert first["latitude"] == pytest.approx(48.000089)
-
-    # Every tracker report pushes a fresh pose.
-    tracker = async_discover_mowers(hass)[0].roles["tracker"]
-    hass.states.async_set(tracker, "home", {"latitude": 48.0001, "longitude": 11.0001})
-    second = (await client.receive_json())["event"]
-    assert second["heading"] == pytest.approx(119.7, abs=0.5)
-
-
-async def test_pose_without_upstream_record_has_no_heading(hass, hass_ws_client) -> None:
-    record = upstream_record()
-    record.reporting_coordinator.data = object()
-    add_upstream_mower(hass, record)
-    await _setup(hass)
-    client = await hass_ws_client(hass)
-
-    await client.send_json_auto_id({"type": f"{DOMAIN}/subscribe_pose", "lawn_mower": LAWN_MOWER})
-    assert (await client.receive_json())["success"]
-    event = (await client.receive_json())["event"]
-    # The tracker's position, and no arrow rather than a wrong one.
-    assert event["heading"] is None
-    assert event["latitude"] == pytest.approx(48.00001)
 
 
 async def test_start_task_rejects_a_foreign_entity(hass, hass_ws_client) -> None:

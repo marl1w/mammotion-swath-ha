@@ -126,22 +126,51 @@ export function renderMap({ map, route, progress, coverage, robot, layers, label
 
   const dock = features(map).find((f) => f.geometry?.type === "Point" && /dock/i.test(f.properties?.title || ""));
   let dockNode = null;
+  let dockExit = null;
   if (dock) {
     const [x, y] = projection.point(dock.geometry.coordinates);
     dockNode = svg("g", { class: "dock" }, [dockIcon()]);
     dockNode.dataset.x = x;
     dockNode.dataset.y = y;
     root.append(dockNode);
+    dockExit = dockExitBearing(map, projection, [x, y]);
   }
 
   const robotNode = svg("g", { class: "robot", visibility: "hidden" }, [mowerIcon()]);
   root.append(robotNode);
 
-  const result = { svg: root, projection, robotNode, dockNode, dockHeading: null };
+  const result = { svg: root, projection, robotNode, dockNode, dockExit };
   applyLayers(root, layers);
   placeRobot(result, robot);
   return result;
 }
+
+/** Compass bearing from one projected point to another (SVG y grows southwards). */
+const bearingXY = ([x1, y1], [x2, y2]) => ((Math.atan2(x2 - x1, -(y2 - y1)) * 180) / Math.PI + 360) % 360;
+
+/**
+ * The direction a mower leaves its dock in: along the map's channel path that starts at
+ * the dock, from the dock end outwards. A docked mower faces this way, and so does the
+ * dock's opening. Null when no path starts near the dock.
+ */
+function dockExitBearing(map, projection, dockPoint) {
+  let best = null;
+  for (const f of features(map)) {
+    if (f.properties?.type_name !== "path" || f.geometry?.type !== "LineString") continue;
+    const coords = f.geometry.coordinates;
+    if (coords.length < 2) continue;
+    const first = projection.point(coords[0]);
+    const last = projection.point(coords[coords.length - 1]);
+    const dFirst = Math.hypot(first[0] - dockPoint[0], first[1] - dockPoint[1]);
+    const dLast = Math.hypot(last[0] - dockPoint[0], last[1] - dockPoint[1]);
+    const [near, far, d] = dFirst <= dLast ? [first, last, dFirst] : [last, first, dLast];
+    if (d < DOCK_PATH_MAX_M && (!best || d < best.d)) best = { d, bearing: bearingXY(near, far) };
+  }
+  return best ? best.bearing : null;
+}
+
+// A channel path counts as leaving the dock when one of its ends is this close to it.
+const DOCK_PATH_MAX_M = 3;
 
 // The icons are drawn one unit long, front towards -y (north before rotation), and
 // scaled to real size — or larger, so they stay findable when the lawn is zoomed out.
@@ -194,23 +223,23 @@ export function applyLayers(root, layers) {
 
 /**
  * Place, turn and size the mower and the dock. *heading* is a compass bearing in
- * degrees; without one the mower faces up and is drawn faded, so it never points
- * confidently the wrong way. Call again after zooming: the icons keep a minimum size.
+ * degrees; *docked* turns the mower to face out of its dock instead. Without either the
+ * mower faces up and is drawn faded, so it never points confidently the wrong way.
+ * Call again after zooming: the icons keep a minimum size.
  */
 export function placeRobot(rendered, robot) {
   if (!rendered) return;
-  const { svg: root, projection, robotNode, dockNode } = rendered;
+  const { svg: root, projection, robotNode, dockNode, dockExit } = rendered;
   const hasPosition = robot && Number.isFinite(robot.lat) && Number.isFinite(robot.lon);
-  const hasHeading = hasPosition && Number.isFinite(robot.heading);
-  let x = 0;
-  let y = 0;
+  const heading = hasPosition && robot.docked && dockExit !== null ? dockExit : hasPosition ? robot.heading : null;
+  const hasHeading = Number.isFinite(heading);
 
   if (hasPosition) {
-    [x, y] = projection.point([robot.lon, robot.lat]);
+    const [x, y] = projection.point([robot.lon, robot.lat]);
     const scale = iconScale(root, MOWER_LENGTH_M);
     robotNode.setAttribute(
       "transform",
-      `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${hasHeading ? robot.heading.toFixed(1) : 0}) scale(${scale.toFixed(3)})`,
+      `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${hasHeading ? heading.toFixed(1) : 0}) scale(${scale.toFixed(3)})`,
     );
     robotNode.classList.toggle("no-heading", !hasHeading);
     robotNode.setAttribute("visibility", "visible");
@@ -221,11 +250,11 @@ export function placeRobot(rendered, robot) {
   if (dockNode) {
     const dx = Number(dockNode.dataset.x);
     const dy = Number(dockNode.dataset.y);
-    // The mower sits on its dock facing out, so a docked mower's heading is the dock's.
-    if (hasHeading && Math.hypot(x - dx, y - dy) < DOCK_LENGTH_M) rendered.dockHeading = robot.heading;
-    const turn = rendered.dockHeading ?? 0;
     const scale = iconScale(root, DOCK_LENGTH_M);
-    dockNode.setAttribute("transform", `translate(${dx.toFixed(2)} ${dy.toFixed(2)}) rotate(${turn.toFixed(1)}) scale(${scale.toFixed(3)})`);
+    dockNode.setAttribute(
+      "transform",
+      `translate(${dx.toFixed(2)} ${dy.toFixed(2)}) rotate(${(dockExit ?? 0).toFixed(1)}) scale(${scale.toFixed(3)})`,
+    );
   }
 }
 

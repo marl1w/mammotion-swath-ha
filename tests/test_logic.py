@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.mammotion_swath.coverage import compute_coverage
-from custom_components.mammotion_swath.upstream import decode_packed_area, heading_from_toward
+from custom_components.mammotion_swath.upstream import decode_packed_area
 
 from .conftest import lawn_square, map_geojson, route_geojson, stripes
 
@@ -22,25 +22,6 @@ from .conftest import lawn_square, map_geojson, route_geojson, stripes
 )
 def test_decode_packed_area(value, expected) -> None:
     assert decode_packed_area(value) == expected
-
-
-def test_heading_of_the_docked_yuka_points_at_its_lawn() -> None:
-    # Real readings while docked facing the lawn, east-south-east of the dock. Upstream's
-    # `direction` attribute read 2 at the time, which drawn as degrees pointed at the house.
-    assert heading_from_toward(25219, -3.04028986) == pytest.approx(119.7, abs=0.5)
-
-
-@pytest.mark.parametrize(
-    ("toward_rad", "yaw", "expected"),
-    [
-        (0.0, 0.0, 90.0),  # along the map's x axis, unrotated: east
-        (1.5707963, 0.0, 0.0),  # along y: north
-        (3.1415926, 0.0, 270.0),  # west
-        (0.0, 1.5707963, 0.0),  # x axis rotated a quarter turn counter-clockwise: north
-    ],
-)
-def test_heading_conventions(toward_rad, yaw, expected) -> None:
-    assert heading_from_toward(toward_rad * 10000, yaw) == pytest.approx(expected, abs=0.01)
 
 
 def test_full_route_leaves_no_gap() -> None:

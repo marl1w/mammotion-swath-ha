@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-import math
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -70,58 +69,6 @@ def _mower_record(hass: HomeAssistant, unique_name: str) -> Any | None:
             if getattr(mower, "unique_name", None) == unique_name:
                 return mower
     return None
-
-
-def heading_from_toward(real_toward: float, map_yaw: float) -> float:
-    """Return a compass bearing in degrees (0 = north, clockwise) for the mower's heading.
-
-    `real_toward` is the heading in 1/10000 rad, counter-clockwise from the map frame's x
-    axis. The map frame is rotated by `map_yaw` against east/north — the same rotation
-    upstream applies to the position — so the angle from east is `toward + yaw`, and a
-    compass bearing is 90° minus that. (Upstream's own `direction` attribute is
-    `int(real_toward / 10000)`: radians truncated to a whole number, not a bearing.)
-    """
-    from_east = real_toward / 10000 + map_yaw
-    return (90 - math.degrees(from_east)) % 360
-
-
-@dataclass(frozen=True)
-class Pose:
-    """Where the mower is and which way it faces."""
-
-    latitude: float
-    longitude: float
-    heading: float | None
-
-    def as_dict(self) -> dict[str, Any]:
-        """Serialise for the websocket API."""
-        return {
-            "latitude": self.latitude,
-            "longitude": self.longitude,
-            "heading": round(self.heading, 1) if self.heading is not None else None,
-        }
-
-
-def async_pose(hass: HomeAssistant, unique_name: str | None) -> Pose | None:
-    """Return the mower's position and true heading, or None when not readable."""
-    if not unique_name:
-        return None
-    try:
-        mower = _mower_record(hass, unique_name)
-        if mower is None:
-            return None
-        data = mower.reporting_coordinator.data
-        device = data.location.device
-        locations = data.report_data.locations or []
-        heading = (
-            heading_from_toward(locations[0].real_toward, data.location.RTK.yaw)
-            if locations
-            else None
-        )
-        return Pose(latitude=device.latitude, longitude=device.longitude, heading=heading)
-    except (AttributeError, TypeError, ValueError, IndexError):
-        _LOGGER.debug("Upstream pose unavailable for %s", unique_name, exc_info=True)
-        return None
 
 
 def async_job_facts(hass: HomeAssistant, unique_name: str | None) -> JobFacts | None:

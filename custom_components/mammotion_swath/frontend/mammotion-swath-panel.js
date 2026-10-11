@@ -33,6 +33,9 @@ const STORAGE_KEY = "mammotion-swath";
 const MIN_TRAVEL_M = 0.25;
 // How long the camera gets to show a picture before the playback hint appears.
 const CAMERA_GRACE_MS = 15000;
+// The stream counts as failed after its clock stood still for this many checks in a row.
+const CAMERA_CHECK_MS = 2000;
+const CAMERA_STALL_CHECKS = 3;
 
 const STYLES = /* css */ `
 /*
@@ -149,6 +152,14 @@ ha-card { overflow: hidden; flex-shrink: 0; }
 }
 .progress-badge[hidden] { display: none; }
 .camera-hint[hidden] { display: none; }
+.camera-stage { position: relative; }
+.camera-lost {
+  position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px; padding: 16px; text-align: center;
+  background: #0e1116; color: #c9d1d9;
+}
+.camera-lost[hidden] { display: none; }
+.camera-lost ha-icon { --mdc-icon-size: 36px; color: #9aa3ad; }
 .progress-badge .big { font-size: 22px; font-variant-numeric: tabular-nums; }
 .progress-badge .dim { font-size: 12px; color: var(--secondary-text-color); }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--divider-color); }
@@ -334,7 +345,7 @@ class MammotionSwathPanel extends HTMLElement {
   disconnectedCallback() {
     for (const t of this._timers) clearInterval(t);
     this._timers = [];
-    clearInterval(this._cameraWatch);
+    this._stopCameraWatch();
     this._resizeObserver?.disconnect();
   }
 
@@ -836,14 +847,25 @@ class MammotionSwathPanel extends HTMLElement {
       });
       live.hass = this._hass;
       this._cameraCard = live;
-      card.append(live);
+      // The overlay sits over the player, so a failed stream never shows the card's own
+      // still-image fallback or its error text; it offers a refresh instead.
+      const lost = el("div", { class: "camera-lost", hidden: true, role: "alert" }, [
+        icon("mdi:video-off-outline"),
+        el("div", { text: "The stream stopped." }),
+        button("Refresh", {
+          icon: "mdi:refresh",
+          primary: true,
+          onClick: () => this.shadowRoot.querySelector(".camera-slot")?.replaceChildren(this._renderCameraCard()),
+        }),
+      ]);
+      card.append(el("div", { class: "camera-stage" }, [live, lost]));
       const hint = el("div", {
         class: "note camera-hint",
         hidden: true,
         text: "No picture yet. The mower sends H.265 video, which this browser may not be able to play. Safari and the Home Assistant apps on Apple devices can.",
       });
       card.append(hint);
-      this._watchCamera(live, hint);
+      this._watchCamera(live, hint, lost);
     } else {
       card.append(el("div", { class: "empty", text: "The camera card could not be loaded." }));
     }
@@ -851,21 +873,54 @@ class MammotionSwathPanel extends HTMLElement {
   }
 
   /**
-   * Show the playback hint only when no picture arrives. The native card keeps its video
-   * deep in nested shadow roots; a frame has arrived once that video has a size.
+   * Watch the stream. The native card keeps its video deep in nested shadow roots.
+   * - A frame has arrived once that video has a size: from then on the stream "has played".
+   * - Never played within the grace period: show the playback hint (likely an H.265 issue).
+   * - Played, then the video is gone, paused, ended or its clock stands still for a few
+   *   checks: the stream failed, so show the refresh overlay instead.
    */
-  _watchCamera(card, hint) {
-    clearInterval(this._cameraWatch);
+  _watchCamera(card, hint, lost) {
+    this._stopCameraWatch();
     const started = Date.now();
+    let hasPlayed = false;
+    let lastTime = null;
+    let stalled = 0;
+    // A tab left alone is where streams usually die: the browser throttles it and the
+    // connection times out. Nothing is judged while hidden, but on coming back a single
+    // check decides — a live stream has advanced by then, a dead one has not.
+    this._cameraVisibility = () => {
+      if (!document.hidden && hasPlayed) stalled = Math.max(stalled, CAMERA_STALL_CHECKS - 1);
+    };
+    document.addEventListener("visibilitychange", this._cameraVisibility);
     this._cameraWatch = setInterval(() => {
       if (!card.isConnected) {
-        clearInterval(this._cameraWatch);
+        this._stopCameraWatch();
         return;
       }
+      // A hidden tab throttles playback; judging it then would raise false alarms.
+      if (document.hidden) return;
       const video = deepQuery(card, "video");
-      const playing = video && video.videoWidth > 0;
-      hint.hidden = playing || Date.now() - started < CAMERA_GRACE_MS;
-    }, 2000);
+      const playing = Boolean(video && video.videoWidth > 0 && !video.paused && !video.ended);
+      const advancing = playing && video.currentTime !== lastTime;
+      lastTime = video ? video.currentTime : null;
+      if (advancing) {
+        hasPlayed = true;
+        stalled = 0;
+      } else if (hasPlayed) {
+        stalled += 1;
+      }
+      const failed = hasPlayed && stalled >= CAMERA_STALL_CHECKS;
+      lost.hidden = !failed;
+      hint.hidden = hasPlayed || Date.now() - started < CAMERA_GRACE_MS;
+    }, CAMERA_CHECK_MS);
+  }
+
+  _stopCameraWatch() {
+    clearInterval(this._cameraWatch);
+    if (this._cameraVisibility) {
+      document.removeEventListener("visibilitychange", this._cameraVisibility);
+      this._cameraVisibility = null;
+    }
   }
 
   _renderJobsCard() {

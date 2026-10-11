@@ -64,7 +64,7 @@ export function ringArea(projection, ring) {
  * Build the map SVG. *layers* toggles route/mowed/gaps; *robot* is {lon, lat, heading}.
  * Returns {svg, projection} or null when the map has no lawn yet.
  */
-export function renderMap({ map, route, progress, coverage, robot, layers, labels }) {
+export function renderMap({ map, route, progress, trail, coverage, robot, layers, labels }) {
   const rings = lawnRings(map);
   if (!rings.length) return null;
   const projection = new Projection(...rings[0].ring[0]);
@@ -110,12 +110,20 @@ export function renderMap({ map, route, progress, coverage, robot, layers, label
   }
   root.append(routeGroup);
 
+  // Mowed: the trail Swath recorded, which is where the mower really drove. Upstream's
+  // progress layer is route lines marked done, so it only means something alongside a
+  // route; without one it is a stale fragment and is left out.
   const mowedGroup = svg("g", { class: "mowed", "data-layer": "mowed" });
-  for (const f of features(progress)) {
-    if (f.geometry?.type === "LineString" && f.geometry.coordinates.length > 1) {
-      mowedGroup.append(svg("path", { d: projection.path(f.geometry.coordinates, false) }));
+  if (features(route).length) {
+    for (const f of features(progress)) {
+      if (f.geometry?.type === "LineString" && f.geometry.coordinates.length > 1) {
+        mowedGroup.append(svg("path", { d: projection.path(f.geometry.coordinates, false) }));
+      }
     }
   }
+  const trailPoints = (features(trail)[0]?.geometry?.coordinates || []).map((c) => [c[0], c[1]]);
+  const trailNode = svg("path", { class: "trail", d: projection.path(trailPoints, false) });
+  mowedGroup.append(trailNode);
   root.append(mowedGroup);
 
   const gapGroup = svg("g", { class: "gaps", "data-layer": "gaps" });
@@ -139,7 +147,7 @@ export function renderMap({ map, route, progress, coverage, robot, layers, label
   const robotNode = svg("g", { class: "robot", visibility: "hidden" }, [mowerIcon()]);
   root.append(robotNode);
 
-  const result = { svg: root, projection, robotNode, dockNode, dockExit };
+  const result = { svg: root, projection, robotNode, dockNode, dockExit, trailNode, trailPoints };
   applyLayers(root, layers);
   placeRobot(result, robot);
   return result;
@@ -256,6 +264,20 @@ export function placeRobot(rendered, robot) {
       `translate(${dx.toFixed(2)} ${dy.toFixed(2)}) rotate(${(dockExit ?? 0).toFixed(1)}) scale(${scale.toFixed(3)})`,
     );
   }
+}
+
+// Positions closer than this to the trail's last point are jitter (as in the backend).
+const TRAIL_STEP_M = 0.15;
+
+/** Extend the drawn trail with a live position, between snapshots. */
+export function extendTrail(rendered, robot) {
+  if (!rendered || !robot || !Number.isFinite(robot.lat) || !Number.isFinite(robot.lon)) return;
+  const points = rendered.trailPoints;
+  const point = [robot.lon, robot.lat];
+  const last = points[points.length - 1];
+  if (last && distance({ lon: last[0], lat: last[1] }, robot) < TRAIL_STEP_M) return;
+  points.push(point);
+  rendered.trailNode.setAttribute("d", rendered.projection.path(points, false));
 }
 
 /** Where the robot is, in map units, or null. */

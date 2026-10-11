@@ -18,7 +18,17 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .api import async_register as async_register_websocket_api
-from .const import DOMAIN, PANEL_ELEMENT, PANEL_ICON, PANEL_TITLE, PANEL_URL_PATH, STATIC_URL
+from .const import (
+    DATA_TRAILS,
+    DOMAIN,
+    PANEL_ELEMENT,
+    PANEL_ICON,
+    PANEL_TITLE,
+    PANEL_URL_PATH,
+    STATIC_URL,
+)
+from .discovery import async_discover_mowers
+from .trail import TrailRecorder
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,6 +57,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_register_websocket_api(hass)
         hass.data[_DATA_WS_REGISTERED] = True
 
+    # Record each mower's trail from now on; mowers set up later are picked up by the
+    # panel's first snapshot request.
+    recorder = TrailRecorder(hass)
+    hass.data[DATA_TRAILS] = recorder
+    for mower in async_discover_mowers(hass):
+        recorder.async_watch(mower)
+
     fingerprint = await hass.async_add_executor_job(frontend_fingerprint)
     static_url = f"{STATIC_URL}/{fingerprint}"
     # Static paths cannot be unregistered, so a reload must not register the same one twice.
@@ -71,6 +88,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Remove the sidebar panel; the websocket commands stay until restart."""
+    """Remove the sidebar panel and stop recording; the websocket commands stay until restart."""
     frontend.async_remove_panel(hass, PANEL_URL_PATH)
+    if (recorder := hass.data.pop(DATA_TRAILS, None)) is not None:
+        recorder.async_stop()
     return True

@@ -12,6 +12,7 @@ import {
   applyLayers,
   bearing,
   distance,
+  extendTrail,
   lawnRings,
   PanZoom,
   placeRobot,
@@ -101,6 +102,8 @@ ha-card { overflow: hidden; flex-shrink: 0; }
 .lawn-map .obstacle { fill: var(--warning-color, #ff9800); opacity: .7; }
 .lawn-map .route path { fill: none; stroke: var(--secondary-text-color); stroke-opacity: .5; stroke-width: .04; }
 .lawn-map .mowed path { fill: none; stroke: var(--success-color, #43a047); stroke-opacity: .55; stroke-width: .16; stroke-linecap: round; }
+/* The recorded trail, about as wide as the cut, so mowed ground reads as a surface. */
+.lawn-map .mowed path.trail { stroke-opacity: .45; stroke-width: .2; stroke-linejoin: round; }
 .lawn-map .gaps path { fill: url(#swath-gap); stroke: var(--warning-color, #ff9800); stroke-width: .05; stroke-dasharray: .14 .1; }
 .lawn-map .gap-fill { fill: var(--warning-color, #ff9800); fill-opacity: .15; }
 .lawn-map .gap-hatch { stroke: var(--warning-color, #ff9800); stroke-width: .1; stroke-opacity: .75; }
@@ -367,6 +370,7 @@ class MammotionSwathPanel extends HTMLElement {
     const here = { lat, lon };
     const state = this._state(this._mower?.lawn_mower);
     if (state === "mowing" || state === "returning") {
+      extendTrail(this._rendered, here);
       if (!this._travelFrom) {
         this._travelFrom = here;
       } else if (distance(this._travelFrom, here) >= MIN_TRAVEL_M) {
@@ -706,6 +710,7 @@ class MammotionSwathPanel extends HTMLElement {
           map: snap.map,
           route: snap.route,
           progress: snap.progress,
+          trail: snap.trail,
           coverage: snap.coverage,
           robot: this._robot(),
           layers: this._layers,
@@ -725,7 +730,13 @@ class MammotionSwathPanel extends HTMLElement {
     }
     card.append(wrap, this._renderStats());
     const routeCount = (snap?.route?.features || []).length;
-    if (snap && !routeCount) card.append(el("div", { class: "note", text: "The planned route reaches Home Assistant only while a job runs." }));
+    if (snap && !routeCount) {
+      const working = ["mowing", "returning", "paused"].includes(this._state(this._mower?.lawn_mower));
+      const text = working
+        ? "The mower has not shared this job's planned route, so only the mowed trail is shown."
+        : "The planned route appears while a job runs.";
+      card.append(el("div", { class: "note", text }));
+    }
     return card;
   }
 
@@ -759,8 +770,16 @@ class MammotionSwathPanel extends HTMLElement {
       cell("Lawn on the map", formatArea(lawn)),
       cell("In this route", formatArea(snap?.job?.route_area_m2)),
       cell("Not in route", Number.isFinite(gap) ? formatArea(gap) : "—", gap >= 1),
-      cell("Progress", Number.isFinite(snap?.job?.route_progress_pct) ? `${snap.job.route_progress_pct}%` : "—"),
+      cell("Progress", this._progressText()),
     ]);
+  }
+
+  /** One progress figure everywhere: the progress sensor, else the mower's report. */
+  _progressText() {
+    const sensor = Number(this._state(this._mower?.roles.progress));
+    if (Number.isFinite(sensor)) return `${sensor}%`;
+    const reported = this._snapshot?.job?.route_progress_pct;
+    return Number.isFinite(reported) ? `${reported}%` : "—";
   }
 
   _renderProgressBadge() {

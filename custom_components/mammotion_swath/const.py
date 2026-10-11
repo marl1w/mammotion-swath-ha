@@ -12,6 +12,7 @@ PANEL_TITLE: Final = "Mower"
 PANEL_ICON: Final = "mdi:robot-mower"
 PANEL_ELEMENT: Final = "mammotion-swath-panel"
 STATIC_URL: Final = "/mammotion_swath_static"
+DATA_TRAILS: Final = f"{DOMAIN}_trails"
 
 # Registry translation keys the upstream integration gives the entities Swath reads.
 # Matching on these rather than on entity ids keeps renamed entities working.

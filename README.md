@@ -11,8 +11,8 @@ Swath adds a **Mower** page to the Home Assistant sidebar: a live map of your la
 ### Live lawn map
 
 - Your real lawn boundary, the charging dock and obstacles.
-- The mower's position, turned the way it is facing, updated about once a second.
-- The planned route and the lanes already mowed, each of which you can show or hide.
+- The mower's position, updated about once a second: facing out of its dock when parked, and the way it is going when moving.
+- A trail of where the mower has actually mowed during the current job, and the planned route when the mower shares it — each can be shown or hidden.
 - Pan, zoom (mouse wheel, pinch or the + and − buttons), centre on the mower with one tap, and a compass so you always know which way is north.
 
 ### Lawn the route leaves out
@@ -59,6 +59,7 @@ The **Mower** page appears in the sidebar.
 
 ## Tips
 
-- **Seeing the route.** The route is shown while a job runs. In the Mammotion integration's options, turn on **Fetch mow path** so it reaches Home Assistant.
+- **Seeing the route.** The planned route is shown while a job runs, if the mower shares it. In the Mammotion integration's options, turn on **Fetch mow path** so it reaches Home Assistant.
+- **The mowed trail** is recorded by Home Assistant during the job, so it starts again after a restart.
 - **Several mowers?** Pick one from the selector at the top of the page.
 - **Hatched areas** are a strong hint, not a verdict: if a route arrives in parts, a gap can show before the rest of it does.

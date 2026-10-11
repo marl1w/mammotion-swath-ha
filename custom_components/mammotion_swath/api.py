@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 import voluptuous as vol
 
-from .const import DOMAIN, UPSTREAM_DOMAIN
+from .const import DATA_TRAILS, DOMAIN, UPSTREAM_DOMAIN
 from .coverage import compute_coverage
 from .discovery import async_discover_mowers, async_find_mower
 from .upstream import async_job_facts
@@ -84,6 +84,10 @@ async def ws_snapshot(
     )
     coverage = await hass.async_add_executor_job(compute_coverage, map_geojson, route_geojson)
     facts = async_job_facts(hass, mower.unique_name)
+    trail = None
+    if (recorder := hass.data.get(DATA_TRAILS)) is not None:
+        recorder.async_watch(mower)
+        trail = recorder.trail(mower.lawn_mower).as_geojson()
 
     connection.send_result(
         msg["id"],
@@ -92,6 +96,7 @@ async def ws_snapshot(
             "map": map_geojson,
             "route": route_geojson,
             "progress": progress_geojson,
+            "trail": trail,
             "tasks": (tasks or {}).get("tasks", []),
             "job": facts.as_dict() if facts else None,
             "coverage": coverage.as_dict() if coverage else None,
